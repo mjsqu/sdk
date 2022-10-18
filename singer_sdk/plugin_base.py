@@ -7,14 +7,16 @@ import json
 import logging
 import os
 from collections import OrderedDict
-from pathlib import PurePath
+from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Callable, Mapping, cast
+from typing import Any, Callable, Mapping, Sequence, cast
 
 import click
 from jsonschema import Draft7Validator, SchemaError, ValidationError
 
 from singer_sdk import metrics
+from singer_sdk._python_types import _FilePath
+from singer_sdk.cli import NestedOption
 from singer_sdk.configuration._dict_config import parse_environment_config
 from singer_sdk.exceptions import ConfigValidationError
 from singer_sdk.helpers._classproperty import classproperty
@@ -70,7 +72,7 @@ class PluginBase(metaclass=abc.ABCMeta):
 
     def __init__(
         self,
-        config: dict | PurePath | str | list[PurePath | str] | None = None,
+        config: dict | _FilePath | Sequence[_FilePath] | None = None,
         parse_env_config: bool = False,
         validate_config: bool = True,
     ) -> None:
@@ -87,7 +89,7 @@ class PluginBase(metaclass=abc.ABCMeta):
         """
         if not config:
             config_dict = {}
-        elif isinstance(config, str) or isinstance(config, PurePath):
+        elif isinstance(config, (str, bytes, os.PathLike)):
             config_dict = read_json_file(config)
         elif isinstance(config, list):
             config_dict = {}
@@ -240,7 +242,7 @@ class PluginBase(metaclass=abc.ABCMeta):
                 errors.append(str(ex.message))
         if errors:
             summary = (
-                f"Config validation failed: {f'; '.join(errors)}\n"
+                f"Config validation failed: {'; '.join(errors)}\n"
                 f"JSONSchema was: {config_jsonschema}"
             )
             if raise_errors:
@@ -391,16 +393,149 @@ class PluginBase(metaclass=abc.ABCMeta):
             formatted = "\n".join([f"{k.title()}: {v}" for k, v in info.items()])
             print(formatted)
 
-    @classproperty
-    def cli(cls) -> Callable:
+    @staticmethod
+    def config_from_cli_args(*args: str) -> tuple[list[Path], bool]:
+        """Parse CLI arguments into a config dictionary.
+
+        Args:
+            args: CLI arguments.
+
+        Raises:
+            FileNotFoundError: If the config file does not exist.
+
+        Returns:
+            A tuple containing the config dictionary and a boolean indicating whether
+            the config file was found.
+        """
+        config_files = []
+        parse_env_config = False
+
+        for config_path in args:
+            if config_path == "ENV":
+                # Allow parse from env vars:
+                parse_env_config = True
+                continue
+
+            # Validate config file paths before adding to list
+            if not Path(config_path).is_file():
+                raise FileNotFoundError(
+                    f"Could not locate config file at '{config_path}'."
+                    "Please check that the file exists."
+                )
+
+            config_files.append(Path(config_path))
+
+        return config_files, parse_env_config
+
+    @abc.abstractclassmethod
+    def invoke(cls, *args: Any, **kwargs: Any) -> None:
+        """Invoke the plugin.
+
+        Args:
+            args: Plugin arguments.
+            kwargs: Plugin keyword arguments.
+        """
+        ...
+
+    @classmethod
+    def cb_version(
+        cls: type[PluginBase],
+        ctx: click.Context,
+        param: click.Option,
+        value: bool,
+    ) -> None:
+        """CLI callback to print the plugin version and exit.
+
+        Args:
+            ctx: Click context.
+            param: Click parameter.
+            value: Boolean indicating whether to print the version.
+        """
+        if not value:
+            return
+        cls.print_version(print_fn=click.echo)
+        ctx.exit()
+
+    @classmethod
+    def cb_about(
+        cls: type[PluginBase],
+        ctx: click.Context,
+        param: click.Option,
+        value: str,
+    ) -> None:
+        """CLI callback to print the plugin information and exit.
+
+        Args:
+            ctx: Click context.
+            param: Click parameter.
+            value: String indicating the format of the information to print.
+        """
+        if not value:
+            return
+        cls.print_about(format=ctx.obj["about"]["about_format"])
+        ctx.exit()
+
+    @classmethod
+    def get_command(cls: type[PluginBase]) -> click.Command:
         """Handle command line execution.
 
         Returns:
             A callable CLI object.
         """
+        return click.Command(
+            name=cls.name,
+            callback=cls.invoke,
+            context_settings={"help_option_names": ["--help"]},
+            params=[
+                click.Option(
+                    ["--version"],
+                    is_flag=True,
+                    help="Display the package version.",
+                    is_eager=True,
+                    expose_value=False,
+                    callback=cls.cb_version,
+                ),
+                *NestedOption(
+                    ["--about"],
+                    help="Display package metadata and settings.",
+                    is_flag=True,
+                    expose_value=False,
+                    callback=cls.cb_about,
+                    suboptions=[
+                        click.Option(
+                            ["--format", "about_format"],
+                            type=click.Choice(
+                                ["plain", "json", "markdown"],
+                                case_sensitive=False,
+                            ),
+                            help="Format for the --about option.",
+                            is_flag=False,
+                            is_eager=True,
+                            expose_value=False,
+                            flag_value="plain",
+                        ),
+                    ],
+                ).as_params(),
+                click.Option(
+                    ["--config"],
+                    multiple=True,
+                    help=(
+                        "Configuration file location or 'ENV' to use environment "
+                        + "variables."
+                    ),
+                    type=click.STRING,
+                    default=(),
+                    is_eager=True,
+                ),
+            ],
+        )
 
-        @click.command()
-        def cli() -> None:
-            pass
+    @classmethod
+    def cli(cls: type[PluginBase]) -> Any:  # noqa: ANN401
+        """Execute standard CLI handler for taps.
 
-        return cli
+        Returns:
+            The return value of the CLI handler.
+        """
+        command = cls.get_command()
+        return command.main()
