@@ -35,6 +35,7 @@ test_dependencies = [
     "pytest-durations",
     "freezegun",
     "pandas",
+    "pyarrow",
     "requests-mock",
     # Cookiecutter tests
     "black",
@@ -57,7 +58,6 @@ def mypy(session: Session) -> None:
         "mypy",
         "pytest",
         "importlib-resources",
-        "sqlalchemy2-stubs",
         "types-jsonschema",
         "types-python-dateutil",
         "types-pytz",
@@ -75,12 +75,6 @@ def tests(session: Session) -> None:
     """Execute pytest tests and compute coverage."""
     session.install(".[s3]")
     session.install(*test_dependencies)
-
-    # temp fix until pyarrow is supported on python 3.11
-    if session.python != "3.11":
-        session.install(
-            "pyarrow",
-        )
 
     try:
         session.run(
