@@ -56,14 +56,16 @@ def flatten_key(key_name: str, parent_keys: list[str], separator: str = "__") ->
     >>> flatten_key("foo", ["bar", "baz"], separator=".")
     'bar.baz.foo'
     """
-    full_key = parent_keys + [key_name]
+    full_key = [*parent_keys, key_name]
     inflected_key = full_key.copy()
     reducer_index = 0
     while len(separator.join(inflected_key)) >= 255 and reducer_index < len(
-        inflected_key
+        inflected_key,
     ):
         reduced_key = re.sub(
-            r"[a-z]", "", inflection.camelize(inflected_key[reducer_index])
+            r"[a-z]",
+            "",
+            inflection.camelize(inflected_key[reducer_index]),
         )
         inflected_key[reducer_index] = (
             reduced_key if len(reduced_key) > 1 else inflected_key[reducer_index][0:3]
@@ -217,7 +219,7 @@ def _flatten_schema(
 
     Args:
         schema_node: The schema node to flatten.
-        parent_key: The parent's key, provided as a list of node names.
+        parent_keys: The parent's key, provided as a list of node names.
         separator: The string to use when concatenating key names.
         level: The current recursion level (zero-based).
         max_level: The max recursion level (zero-based, exclusive).
@@ -234,16 +236,16 @@ def _flatten_schema(
 
     for k, v in schema_node["properties"].items():
         new_key = flatten_key(k, parent_keys, separator)
-        if "type" in v.keys():
+        if "type" in v:
             if "object" in v["type"] and "properties" in v and level < max_level:
                 items.extend(
                     _flatten_schema(
                         v,
-                        parent_keys + [k],
+                        [*parent_keys, k],
                         separator=separator,
                         level=level + 1,
                         max_level=max_level,
-                    ).items()
+                    ).items(),
                 )
             else:
                 items.append((new_key, v))
@@ -332,11 +334,11 @@ def _flatten_record(
                 _flatten_record(
                     v,
                     flattened_schema,
-                    parent_key + [k],
+                    [*parent_key, k],
                     separator=separator,
                     level=level + 1,
                     max_level=max_level,
-                ).items()
+                ).items(),
             )
         else:
             items.append(
@@ -345,7 +347,7 @@ def _flatten_record(
                     json.dumps(v)
                     if _should_jsondump_value(k, v, flattened_schema)
                     else v,
-                )
+                ),
             )
 
     return dict(items)
@@ -357,7 +359,7 @@ def _should_jsondump_value(key: str, value: Any, flattened_schema=None) -> bool:
     Args:
         key: [description]
         value: [description]
-        schema: [description]. Defaults to None.
+        flattened_schema: [description]. Defaults to None.
 
     Returns:
         [description]

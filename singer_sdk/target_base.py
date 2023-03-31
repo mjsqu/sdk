@@ -7,12 +7,11 @@ import copy
 import json
 import sys
 import time
-from typing import IO, Counter, Sequence
+from typing import IO, TYPE_CHECKING, Counter, Sequence
 
 import click
 from joblib import Parallel, delayed, parallel_backend
 
-from singer_sdk._python_types import _FilePath
 from singer_sdk.exceptions import RecordsWithoutSchemaException
 from singer_sdk.helpers._batch import BaseBatchFileEncoding
 from singer_sdk.helpers._classproperty import classproperty
@@ -26,7 +25,10 @@ from singer_sdk.helpers.capabilities import (
 from singer_sdk.io_base import SingerMessageType, SingerReader
 from singer_sdk.mapper import PluginMapper
 from singer_sdk.plugin_base import PluginBase
-from singer_sdk.sinks import Sink
+
+if TYPE_CHECKING:
+    from singer_sdk._python_types import _FilePath
+    from singer_sdk.sinks import Sink
 
 _MAX_PARALLELISM = 8
 
@@ -168,7 +170,7 @@ class Target(PluginBase, SingerReader, metaclass=abc.ABCMeta):
         ):
             self.logger.info(
                 f"Schema or key properties for '{stream_name}' stream have changed. "
-                f"Initializing a new '{stream_name}' sink..."
+                f"Initializing a new '{stream_name}' sink...",
             )
             self._sinks_to_clear.append(self._sinks_active.pop(stream_name))
             return self.add_sink(stream_name, schema, key_properties)
@@ -195,7 +197,7 @@ class Target(PluginBase, SingerReader, metaclass=abc.ABCMeta):
 
         raise ValueError(
             f"No sink class defined for '{stream_name}' "
-            "and no default sink class available."
+            "and no default sink class available.",
         )
 
     def sink_exists(self, stream_name: str) -> bool:
@@ -213,7 +215,10 @@ class Target(PluginBase, SingerReader, metaclass=abc.ABCMeta):
 
     @final
     def add_sink(
-        self, stream_name: str, schema: dict, key_properties: list[str] | None = None
+        self,
+        stream_name: str,
+        schema: dict,
+        key_properties: list[str] | None = None,
     ) -> Sink:
         """Create a sink and register it.
 
@@ -252,10 +257,19 @@ class Target(PluginBase, SingerReader, metaclass=abc.ABCMeta):
         if not self.sink_exists(stream_name):
             raise RecordsWithoutSchemaException(
                 f"A record for stream '{stream_name}' was encountered before a "
-                "corresponding schema."
+                "corresponding schema.",
             )
 
     # Message handling
+
+    def _handle_max_record_age(self) -> None:
+        """Check if _MAX_RECORD_AGE_IN_MINUTES reached, and if so trigger drain."""
+        if self._max_record_age_in_minutes > self._MAX_RECORD_AGE_IN_MINUTES:
+            self.logger.info(
+                "One or more records have exceeded the max age of "
+                f"{self._MAX_RECORD_AGE_IN_MINUTES} minutes. Draining all sinks.",
+            )
+            self.drain_all()
 
     def _process_lines(self, file_input: IO[str]) -> Counter[str]:
         """Internal method to process jsonl lines from a Singer tap.
@@ -275,7 +289,7 @@ class Target(PluginBase, SingerReader, metaclass=abc.ABCMeta):
             f"Target '{self.name}' completed reading {line_count} lines of input "
             f"({counter[SingerMessageType.RECORD]} records, "
             f"({counter[SingerMessageType.BATCH]} batch manifests, "
-            f"{counter[SingerMessageType.STATE]} state messages)."
+            f"{counter[SingerMessageType.STATE]} state messages).",
         )
 
         return counter
@@ -294,7 +308,6 @@ class Target(PluginBase, SingerReader, metaclass=abc.ABCMeta):
 
         stream_name = message_dict["stream"]
         for stream_map in self.mapper.stream_maps[stream_name]:
-            # new_schema = helpers._float_to_decimal(new_schema)
             raw_record = copy.copy(message_dict["record"])
             transformed_record = stream_map.transform(raw_record)
             if transformed_record is None:
@@ -305,7 +318,9 @@ class Target(PluginBase, SingerReader, metaclass=abc.ABCMeta):
             context = sink._get_context(transformed_record)
             if sink.include_sdc_metadata_properties:
                 sink._add_sdc_metadata_to_record(
-                    transformed_record, message_dict, context
+                    transformed_record,
+                    message_dict,
+                    context,
                 )
             else:
                 sink._remove_sdc_metadata_from_record(transformed_record)
@@ -319,9 +334,11 @@ class Target(PluginBase, SingerReader, metaclass=abc.ABCMeta):
 
             if sink.is_full:
                 self.logger.info(
-                    f"Target sink for '{sink.stream_name}' is full. Draining..."
+                    f"Target sink for '{sink.stream_name}' is full. Draining...",
                 )
                 self.drain_one(sink)
+
+        self._handle_max_record_age()
 
     def _process_schema_message(self, message_dict: dict) -> None:
         """Process a SCHEMA messages.
@@ -341,7 +358,7 @@ class Target(PluginBase, SingerReader, metaclass=abc.ABCMeta):
         elif self.mapper.stream_maps[stream_name][0].raw_schema != schema:
             self.logger.info(
                 f"Schema has changed for stream '{stream_name}'. "
-                "Mapping definitions will be reset."
+                "Mapping definitions will be reset.",
             )
             do_registration = True
         elif (
@@ -349,14 +366,14 @@ class Target(PluginBase, SingerReader, metaclass=abc.ABCMeta):
         ):
             self.logger.info(
                 f"Key properties have changed for stream '{stream_name}'. "
-                "Mapping definitions will be reset."
+                "Mapping definitions will be reset.",
             )
             do_registration = True
 
         if not do_registration:
             self.logger.debug(
                 f"No changes detected in SCHEMA message for stream '{stream_name}'. "
-                "Ignoring."
+                "Ignoring.",
             )
             return
 
@@ -366,7 +383,6 @@ class Target(PluginBase, SingerReader, metaclass=abc.ABCMeta):
             key_properties,
         )
         for stream_map in self.mapper.stream_maps[stream_name]:
-            # new_schema = helpers._float_to_decimal(new_schema)
             _ = self.get_sink(
                 stream_map.stream_alias,
                 schema=stream_map.transformed_schema,
@@ -393,12 +409,6 @@ class Target(PluginBase, SingerReader, metaclass=abc.ABCMeta):
         if self._latest_state == state:
             return
         self._latest_state = state
-        if self._max_record_age_in_minutes > self._MAX_RECORD_AGE_IN_MINUTES:
-            self.logger.info(
-                "One or more records have exceeded the max age of "
-                f"{self._MAX_RECORD_AGE_IN_MINUTES} minutes. Draining all sinks."
-            )
-            self.drain_all()
 
     def _process_activate_version_message(self, message_dict: dict) -> None:
         """Handle the optional ACTIVATE_VERSION message extension.
@@ -423,6 +433,7 @@ class Target(PluginBase, SingerReader, metaclass=abc.ABCMeta):
             encoding,
             message_dict["manifest"],
         )
+        self._handle_max_record_age()
 
     # Sink drain methods
 
@@ -493,7 +504,7 @@ class Target(PluginBase, SingerReader, metaclass=abc.ABCMeta):
     # CLI handler
 
     @classmethod
-    def invoke(  # type: ignore[override]
+    def invoke(
         cls: type[Target],
         config: tuple[str, ...] = (),
         file_input: IO[str] | None = None,

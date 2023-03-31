@@ -1,18 +1,18 @@
 """Tap abstract class."""
 
+
 from __future__ import annotations
 
 import abc
+import contextlib
 import json
 from enum import Enum
-from pathlib import PurePath
-from typing import Any, Sequence, cast
+from typing import TYPE_CHECKING, Any, Iterable, Sequence, cast
 
 import click
 
-from singer_sdk._python_types import _FilePath
 from singer_sdk._singerlib import Catalog
-from singer_sdk.exceptions import MaxRecordsLimitException
+from singer_sdk.exceptions import AbortedSyncFailedException, AbortedSyncPausedException
 from singer_sdk.helpers import _state
 from singer_sdk.helpers._classproperty import classproperty
 from singer_sdk.helpers._compat import final
@@ -25,7 +25,12 @@ from singer_sdk.helpers.capabilities import (
 )
 from singer_sdk.mapper import PluginMapper
 from singer_sdk.plugin_base import PluginBase
-from singer_sdk.streams import SQLStream, Stream
+
+if TYPE_CHECKING:
+    from pathlib import PurePath
+
+    from singer_sdk._python_types import _FilePath
+    from singer_sdk.streams import SQLStream, Stream
 
 STREAM_MAPS_CONFIG = "stream_maps"
 
@@ -83,7 +88,7 @@ class Tap(PluginBase, metaclass=abc.ABCMeta):
         if isinstance(catalog, Catalog):
             self._input_catalog = catalog
         elif isinstance(catalog, dict):
-            self._input_catalog = Catalog.from_dict(catalog)  # type: ignore
+            self._input_catalog = Catalog.from_dict(catalog)  # type: ignore[arg-type]
         elif catalog is not None:
             self._input_catalog = Catalog.from_dict(read_json_file(catalog))
 
@@ -176,31 +181,58 @@ class Tap(PluginBase, metaclass=abc.ABCMeta):
             PluginCapabilities.FLATTENING,
         ]
 
-    # Connection test:
+    # Connection and sync tests:
 
     @final
     def run_connection_test(self) -> bool:
-        """Run connection test.
+        """Run connection test, aborting each stream after 1 record.
 
         Returns:
             True if the test succeeded.
         """
-        for stream in self.streams.values():
-            # Initialize streams' record limits before beginning the sync test.
-            stream._MAX_RECORDS_LIMIT = 1
+        return self.run_sync_dry_run(
+            dry_run_record_limit=1,
+            streams=self.streams.values(),
+        )
 
-        for stream in self.streams.values():
+    @final
+    def run_sync_dry_run(
+        self,
+        dry_run_record_limit: int | None = 1,
+        streams: Iterable[Stream] | None = None,
+    ) -> bool:
+        """Run connection test.
+
+        Exceptions of type `MaxRecordsLimitException` and
+        `PartialSyncSuccessException` will be ignored.
+
+        Args:
+            dry_run_record_limit: The max number of records to sync per stream object.
+            streams: The streams to test. If omitted, all streams will be tested.
+
+        Returns:
+            True if the test succeeded.
+        """
+        if streams is None:
+            streams = self.streams.values()
+
+        for stream in streams:
+            # Initialize streams' record limits before beginning the sync test.
+            stream.ABORT_AT_RECORD_COUNT = dry_run_record_limit
+
+        for stream in streams:
             if stream.parent_stream_type:
                 self.logger.debug(
                     f"Child stream '{type(stream).__name__}' should be called by "
                     f"parent stream '{stream.parent_stream_type.__name__}'. "
-                    "Skipping direct invocation."
+                    "Skipping direct invocation.",
                 )
                 continue
-            try:
+            with contextlib.suppress(
+                AbortedSyncFailedException,
+                AbortedSyncPausedException,
+            ):
                 stream.sync()
-            except MaxRecordsLimitException:
-                pass
         return True
 
     @final
@@ -218,7 +250,7 @@ class Tap(PluginBase, metaclass=abc.ABCMeta):
             The catalog as a string of JSON.
         """
         catalog_text = self.catalog_json_text
-        print(catalog_text)
+        print(catalog_text)  # noqa: T201
         return catalog_text
 
     @property
@@ -263,7 +295,7 @@ class Tap(PluginBase, metaclass=abc.ABCMeta):
         """
         raise NotImplementedError(
             f"Tap '{self.name}' does not support discovery. "
-            "Please set the '--catalog' command line argument and try again."
+            "Please set the '--catalog' command line argument and try again.",
         )
 
     @final
@@ -294,7 +326,7 @@ class Tap(PluginBase, metaclass=abc.ABCMeta):
                     for stream in streams:
                         parent.child_streams.append(stream)
                         self.logger.info(
-                            f"Added '{stream.name}' as child stream to '{parent.name}'"
+                            f"Added '{stream.name}' as child stream to '{parent.name}'",
                         )
 
         streams = [stream for streams in streams_by_type.values() for stream in streams]
@@ -352,7 +384,7 @@ class Tap(PluginBase, metaclass=abc.ABCMeta):
                         f"Stream descendent '{descendent.name}' is selected and "
                         f"its parent '{stream.name}' does not use inclusive "
                         f"replication keys. "
-                        f"Forcing full table replication for '{stream.name}'."
+                        f"Forcing full table replication for '{stream.name}'.",
                     )
                     stream.replication_key = None
                     stream.forced_replication_method = "FULL_TABLE"
@@ -374,7 +406,7 @@ class Tap(PluginBase, metaclass=abc.ABCMeta):
                 self.logger.debug(
                     f"Child stream '{type(stream).__name__}' is expected to be called "
                     f"by parent stream '{stream.parent_stream_type.__name__}'. "
-                    "Skipping direct invocation."
+                    "Skipping direct invocation.",
                 )
                 continue
 
@@ -390,7 +422,7 @@ class Tap(PluginBase, metaclass=abc.ABCMeta):
     # Command Line Execution
 
     @classmethod
-    def invoke(  # type: ignore[override]
+    def invoke(
         cls: type[Tap],
         config: tuple[str, ...] = (),
         state: str | None = None,
@@ -420,7 +452,7 @@ class Tap(PluginBase, metaclass=abc.ABCMeta):
     def cb_discover(
         cls: type[Tap],
         ctx: click.Context,
-        param: click.Option,
+        param: click.Option,  # noqa: ARG003
         value: bool,
     ) -> None:
         """CLI callback to run the tap in discovery mode.
@@ -447,7 +479,7 @@ class Tap(PluginBase, metaclass=abc.ABCMeta):
     def cb_test(
         cls: type[Tap],
         ctx: click.Context,
-        param: click.Option,
+        param: click.Option,  # noqa: ARG003
         value: bool,
     ) -> None:
         """CLI callback to run the tap in test mode.
@@ -500,8 +532,8 @@ class Tap(PluginBase, metaclass=abc.ABCMeta):
                     default=CliTestOptionValue.Disabled.value,
                     help=(
                         "Use --test to sync a single record for each stream. "
-                        + "Use --test=schema to test schema output without syncing "
-                        + "records."
+                        "Use --test=schema to test schema output without syncing "
+                        "records."
                     ),
                     callback=cls.cb_test,
                     expose_value=False,

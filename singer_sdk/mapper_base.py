@@ -18,7 +18,7 @@ class InlineMapper(PluginBase, SingerReader, metaclass=abc.ABCMeta):
     """Abstract base class for inline mappers."""
 
     @classproperty
-    def _env_prefix(cls) -> str:
+    def _env_prefix(cls) -> str:  # noqa: N805
         return f"{cls.name.upper().replace('-', '_')}_"
 
     @classproperty
@@ -108,7 +108,7 @@ class InlineMapper(PluginBase, SingerReader, metaclass=abc.ABCMeta):
     # CLI handler
 
     @classmethod
-    def invoke(  # type: ignore[override]
+    def invoke(
         cls: type[InlineMapper],
         config: tuple[str, ...] = (),
         file_input: IO[str] | None = None,

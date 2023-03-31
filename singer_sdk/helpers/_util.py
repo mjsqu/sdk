@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import json
+import typing as t
 from pathlib import Path
-from typing import Any, cast
 
 import pendulum
 
-from singer_sdk._python_types import _FilePath
+if t.TYPE_CHECKING:
+    from singer_sdk._python_types import _FilePath
 
 
-def read_json_file(path: _FilePath) -> dict[str, Any]:
+def read_json_file(path: _FilePath) -> dict[str, t.Any]:
     """Read json file, throwing an error if missing."""
     if not path:
         raise RuntimeError("Could not open file. Filepath not provided.")
@@ -25,7 +26,7 @@ def read_json_file(path: _FilePath) -> dict[str, Any]:
                 msg += f"\nFor more info, please see the sample template at: {template}"
         raise FileExistsError(msg)
 
-    return cast(dict, json.loads(path_obj.read_text()))
+    return t.cast(dict, json.loads(path_obj.read_text()))
 
 
 def utc_now() -> pendulum.DateTime:
