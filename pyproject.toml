@@ -166,6 +166,7 @@ source = ["singer_sdk", "tests"]
 omit = [
     "tests/*",
     "samples/*",
+    "singer_sdk/_python_types.py",
     "singer_sdk/helpers/_compat.py",
 ]
 
