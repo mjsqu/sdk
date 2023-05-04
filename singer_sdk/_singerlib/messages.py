@@ -189,13 +189,8 @@ def format_message(message: Message,option=0) -> str:
 
     Returns:
         The formatted message.
-    """
-    def default(obj):
-        if isinstance(obj, decimal.Decimal):
-            return str(obj)
-        raise TypeError
-            
-    return orjson.dumps(message.to_dict(), option=option, default=default)
+    """            
+    return orjson.dumps(message.to_dict(), option=option, default=str)
 
 def write_message(message: Message) -> None:
     """Write a message to stdout.
