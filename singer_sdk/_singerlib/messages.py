@@ -195,7 +195,7 @@ def format_message(message: Message,option=0) -> str:
             return str(obj)
         raise TypeError
             
-    return json.dumps(message.asdict(), option=option, default=default)
+    return json.dumps(message.to_dict(), option=option, default=default)
 
 def write_message(message: Message) -> None:
     """Write a message to stdout.
