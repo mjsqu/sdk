@@ -8,6 +8,7 @@ import typing as t
 from dataclasses import asdict, dataclass, field
 
 import pytz
+import decimal
 import orjson as json
 
 if t.TYPE_CHECKING:
@@ -180,7 +181,7 @@ class ActivateVersionMessage(Message):
         self.type = SingerMessageType.ACTIVATE_VERSION
 
 
-def format_message(message: Message) -> str:
+def format_message(message: Message,option=0) -> str:
     """Format a message as a JSON string.
 
     Args:
@@ -189,8 +190,12 @@ def format_message(message: Message) -> str:
     Returns:
         The formatted message.
     """
-    return json.dumps(message.to_dict(), use_decimal=True, default=str)
-
+    def default(obj):
+        if isinstance(obj, decimal.Decimal):
+            return str(obj)
+        raise TypeError
+            
+    return json.dumps(message.asdict(), option=option, default=default)
 
 def write_message(message: Message) -> None:
     """Write a message to stdout.
