@@ -198,5 +198,5 @@ def write_message(message: Message) -> None:
     Args:
         message: The message to write.
     """
-    sys.stdout.buffer.write(format_message(message, option=orjson.OPT_APPEND_NEWLINE))
+    sys.stdout.buffer.write(format_message(message, option=orjson.OPT_APPEND_NEWLINE | orjson.OPT_NON_STR_KEYS))
     sys.stdout.buffer.flush()
