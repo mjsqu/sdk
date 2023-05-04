@@ -9,7 +9,7 @@ from dataclasses import asdict, dataclass, field
 
 import pytz
 import decimal
-import orjson as json
+import orjson
 
 if t.TYPE_CHECKING:
     from datetime import datetime
@@ -195,7 +195,7 @@ def format_message(message: Message,option=0) -> str:
             return str(obj)
         raise TypeError
             
-    return json.dumps(message.to_dict(), option=option, default=default)
+    return orjson.dumps(message.to_dict(), option=option, default=default)
 
 def write_message(message: Message) -> None:
     """Write a message to stdout.
@@ -203,5 +203,5 @@ def write_message(message: Message) -> None:
     Args:
         message: The message to write.
     """
-    sys.stdout.write(format_message(message) + "\n")
+    sys.stdout.write(format_message(message, option=orjson.OPT_APPEND_NEWLINE))
     sys.stdout.flush()
