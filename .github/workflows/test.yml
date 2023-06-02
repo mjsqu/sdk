@@ -28,6 +28,7 @@ jobs:
         os: ["ubuntu-latest", "macos-latest", "windows-latest"]
         python-version: ["3.7", "3.8", "3.9", "3.10", "3.11"]
         include:
+        - { session: tests,   python-version: "3.11", os: "ubuntu-latest", sqlalchemy: "1.*" }
         - { session: doctest, python-version: "3.10", os: "ubuntu-latest" }
         - { session: mypy,    python-version: "3.8",  os: "ubuntu-latest" }
 
@@ -60,6 +61,7 @@ jobs:
     - name: Install Nox
       env:
         PIP_CONSTRAINT: .github/workflows/constraints.txt
+        SQLALCHEMY_VERSION: ${{ matrix.sqlalchemy }}
       run: |
         pipx install --pip-args=--constraint=.github/workflows/constraints.txt nox
         pipx inject --pip-args=--constraint=.github/workflows/constraints.txt nox nox-poetry
