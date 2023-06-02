@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import typing as t
 from enum import Enum, EnumMeta
-from typing import Any, TypeVar
 from warnings import warn
 
 from singer_sdk.typing import (
@@ -15,7 +15,7 @@ from singer_sdk.typing import (
     StringType,
 )
 
-_EnumMemberT = TypeVar("_EnumMemberT")
+_EnumMemberT = t.TypeVar("_EnumMemberT")
 
 # Default JSON Schema to support config for built-in capabilities:
 
@@ -23,9 +23,11 @@ STREAM_MAPS_CONFIG = PropertiesList(
     Property(
         "stream_maps",
         ObjectType(),
-        description="Config object for stream maps capability. "
-        + "For more information check out "
-        + "[Stream Maps](https://sdk.meltano.com/en/latest/stream_maps.html).",
+        description=(
+            "Config object for stream maps capability. "
+            "For more information check out "
+            "[Stream Maps](https://sdk.meltano.com/en/latest/stream_maps.html)."
+        ),
     ),
     Property(
         "stream_map_config",
@@ -46,6 +48,34 @@ FLATTENING_CONFIG = PropertiesList(
         "flattening_max_depth",
         IntegerType(),
         description="The max depth to flatten schemas.",
+    ),
+).to_dict()
+BATCH_CONFIG = PropertiesList(
+    Property(
+        "batch_config",
+        description="",
+        wrapped=ObjectType(
+            Property(
+                "encoding",
+                description="Specifies the format and compression of the batch files.",
+                wrapped=ObjectType(
+                    Property("format", StringType, allowed_values=["jsonl"]),
+                    Property(
+                        "compression",
+                        StringType,
+                        allowed_values=["gzip", "none"],
+                    ),
+                ),
+            ),
+            Property(
+                "storage",
+                description="Defines the storage layer to use when writing batch files",
+                wrapped=ObjectType(
+                    Property("root", StringType),
+                    Property("prefix", StringType),
+                ),
+            ),
+        ),
     ),
 ).to_dict()
 TARGET_SCHEMA_CONFIG = PropertiesList(
@@ -101,7 +131,7 @@ class DeprecatedEnum(Enum):
 class DeprecatedEnumMeta(EnumMeta):
     """Metaclass for enumeration with deprecation support."""
 
-    def __getitem__(self, name: str) -> Any:  # noqa: ANN401
+    def __getitem__(self, name: str) -> t.Any:  # noqa: ANN401
         """Retrieve mapping item.
 
         Args:
@@ -115,7 +145,7 @@ class DeprecatedEnumMeta(EnumMeta):
             obj.emit_warning()
         return obj
 
-    def __getattribute__(cls, name: str) -> Any:  # noqa: ANN401
+    def __getattribute__(cls, name: str) -> t.Any:  # noqa: ANN401, N805
         """Retrieve enum attribute.
 
         Args:
@@ -129,7 +159,7 @@ class DeprecatedEnumMeta(EnumMeta):
             obj.emit_warning()
         return obj
 
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:  # noqa: ANN401
+    def __call__(self, *args: t.Any, **kwargs: t.Any) -> t.Any:  # noqa: ANN401
         """Call enum member.
 
         Args:

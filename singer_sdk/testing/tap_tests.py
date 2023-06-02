@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import typing as t
 import warnings
-from typing import Type, cast
 
 from dateutil import parser
+from jsonschema import Draft7Validator
 
 import singer_sdk.helpers._typing as th
 from singer_sdk import Tap
-from singer_sdk.streams.core import Stream
 
 from .templates import AttributeTestTemplate, StreamTestTemplate, TapTestTemplate
+
+if t.TYPE_CHECKING:
+    from singer_sdk.streams.core import Stream
 
 
 class TapCLIPrintsTest(TapTestTemplate):
@@ -23,7 +26,7 @@ class TapCLIPrintsTest(TapTestTemplate):
         """Run test."""
         self.tap.print_version()
         self.tap.print_about()
-        self.tap.print_about(format="json")
+        self.tap.print_about(output_format="json")
 
 
 class TapDiscoveryTest(TapTestTemplate):
@@ -38,8 +41,10 @@ class TapDiscoveryTest(TapTestTemplate):
         catalog = tap1.catalog_dict
         # Reset and re-initialize with discovered catalog
         kwargs = {k: v for k, v in self.runner.default_kwargs.items() if k != "catalog"}
-        tap2: Tap = cast(Type[Tap], self.runner.singer_class)(
-            config=self.runner.config, catalog=catalog, **kwargs
+        tap2: Tap = t.cast(t.Type[Tap], self.runner.singer_class)(
+            config=self.runner.config,
+            catalog=catalog,
+            **kwargs,
         )
         assert tap2
 
@@ -67,7 +72,7 @@ class StreamReturnsRecordTest(StreamTestTemplate):
             or self.stream.name in self.config.ignore_no_records_for_streams
         ):
             # only warn if this or all streams are set to ignore no records
-            warnings.warn(UserWarning(no_records_message))
+            warnings.warn(UserWarning(no_records_message), stacklevel=2)
         else:
             record_count = len(self.stream_records)
             assert record_count > 0, no_records_message
@@ -85,7 +90,8 @@ class StreamCatalogSchemaMatchesRecordTest(StreamTestTemplate):
         diff = stream_catalog_keys - stream_record_keys
         if diff:
             warnings.warn(
-                UserWarning(f"Fields in catalog but not in records: ({diff})")
+                UserWarning(f"Fields in catalog but not in records: ({diff})"),
+                stacklevel=2,
             )
 
 
@@ -100,6 +106,30 @@ class StreamRecordSchemaMatchesCatalogTest(StreamTestTemplate):
         stream_record_keys = set().union(*(d.keys() for d in self.stream_records))
         diff = stream_record_keys - stream_catalog_keys
         assert not diff, f"Fields in records but not in catalog: ({diff})"
+
+
+class StreamRecordMatchesStreamSchema(StreamTestTemplate):
+    """Test all attributes in the record schema are present in the catalog schema."""
+
+    name = "record_matches_stream_schema"
+
+    def test(self) -> None:
+        """Run test."""
+        schema = self.stream.schema
+        validator = Draft7Validator(
+            schema,
+            format_checker=Draft7Validator.FORMAT_CHECKER,
+        )
+        for record in self.stream_records:
+            errors = list(validator.iter_errors(record))
+            error_messages = "\n".join(
+                [
+                    f"{e.message} (path: {'.'.join(str(p) for p in e.path)})"
+                    for e in errors
+                    if e.path
+                ],
+            )
+            assert not errors, f"Record does not match stream schema: {error_messages}"
 
 
 class StreamPrimaryKeysTest(StreamTestTemplate):
@@ -119,7 +149,8 @@ class StreamPrimaryKeysTest(StreamTestTemplate):
                 (r[k] for k in primary_keys or []) for r in self.stream_records
             ]
         except KeyError as e:
-            raise AssertionError(f"Record missing primary key: {str(e)}")
+            msg = f"Record missing primary key: {e!s}"
+            raise AssertionError(msg) from e
         count_unique_records = len(set(record_ids))
         count_records = len(self.stream_records)
         assert count_unique_records == count_records, (
@@ -152,8 +183,8 @@ class AttributeIsDateTimeTest(AttributeTestTemplate):
     @classmethod
     def evaluate(
         cls,
-        stream: Stream,
-        property_name: str,
+        stream: Stream,  # noqa: ARG003
+        property_name: str,  # noqa: ARG003
         property_schema: dict,
     ) -> bool:
         """Determine if this attribute test is applicable to the given property.
@@ -185,8 +216,8 @@ class AttributeIsBooleanTest(AttributeTestTemplate):
     @classmethod
     def evaluate(
         cls,
-        stream: Stream,
-        property_name: str,
+        stream: Stream,  # noqa: ARG003
+        property_name: str,  # noqa: ARG003
         property_schema: dict,
     ) -> bool:
         """Determine if this attribute test is applicable to the given property.
@@ -215,8 +246,8 @@ class AttributeIsObjectTest(AttributeTestTemplate):
     @classmethod
     def evaluate(
         cls,
-        stream: Stream,
-        property_name: str,
+        stream: Stream,  # noqa: ARG003
+        property_name: str,  # noqa: ARG003
         property_schema: dict,
     ) -> bool:
         """Determine if this attribute test is applicable to the given property.
@@ -241,14 +272,15 @@ class AttributeIsIntegerTest(AttributeTestTemplate):
         """Run test."""
         for v in self.non_null_attribute_values:
             assert isinstance(v, int) or isinstance(
-                int(v), int
+                int(v),
+                int,
             ), f"Unable to cast value ('{v}') to int type."
 
     @classmethod
     def evaluate(
         cls,
-        stream: Stream,
-        property_name: str,
+        stream: Stream,  # noqa: ARG003
+        property_name: str,  # noqa: ARG003
         property_schema: dict,
     ) -> bool:
         """Determine if this attribute test is applicable to the given property.
@@ -276,17 +308,15 @@ class AttributeIsNumberTest(AttributeTestTemplate):
             AssertionError: if value cannot be cast to float type.
         """
         for v in self.non_null_attribute_values:
-            try:
-                error_message = f"Unable to cast value ('{v}') to float type."
-                assert isinstance(v, (float, int)), error_message
-            except Exception as e:
-                raise AssertionError(error_message) from e
+            error_message = f"Unable to cast value ('{v}') to float type."
+            if not isinstance(v, (float, int)):
+                raise AssertionError(error_message)
 
     @classmethod
     def evaluate(
         cls,
-        stream: Stream,
-        property_name: str,
+        stream: Stream,  # noqa: ARG003
+        property_name: str,  # noqa: ARG003
         property_schema: dict,
     ) -> bool:
         """Determine if this attribute test is applicable to the given property.
@@ -317,8 +347,8 @@ class AttributeNotNullTest(AttributeTestTemplate):
     @classmethod
     def evaluate(
         cls,
-        stream: Stream,
-        property_name: str,
+        stream: Stream,  # noqa: ARG003
+        property_name: str,  # noqa: ARG003
         property_schema: dict,
     ) -> bool:
         """Determine if this attribute test is applicable to the given property.

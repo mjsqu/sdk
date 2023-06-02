@@ -23,7 +23,7 @@ CONFIG_JSONSCHEMA = th.PropertiesList(
 @pytest.fixture
 def config_file1(tmpdir) -> str:
     filepath: str = tmpdir.join("file1.json")
-    with open(filepath, "w") as f:
+    with Path(filepath).open("w") as f:
         json.dump({"prop2": "from-file-1"}, f)
 
     return filepath
@@ -32,7 +32,7 @@ def config_file1(tmpdir) -> str:
 @pytest.fixture
 def config_file2(tmpdir) -> str:
     filepath: str = tmpdir.join("file2.json")
-    with open(filepath, "w") as f:
+    with Path(filepath).open("w") as f:
         json.dump({"prop3": ["from-file-2"]}, f)
 
     return filepath
@@ -89,9 +89,8 @@ def test_get_env_var_config_not_parsable():
             "PLUGIN_TEST_PROP1": "hello",
             "PLUGIN_TEST_PROP3": '["repeated"]',
         },
-    ):
-        with pytest.raises(ValueError, match="A bracketed list was detected"):
-            parse_environment_config(CONFIG_JSONSCHEMA, "PLUGIN_TEST_")
+    ), pytest.raises(ValueError, match="A bracketed list was detected"):
+        parse_environment_config(CONFIG_JSONSCHEMA, "PLUGIN_TEST_")
 
 
 def test_merge_config_sources(config_file1, config_file2):

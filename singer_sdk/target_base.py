@@ -7,14 +7,11 @@ import copy
 import json
 import sys
 import time
-from io import FileIO
-from pathlib import Path, PurePath
-from typing import IO, Callable, Counter
+import typing as t
 
 import click
 from joblib import Parallel, delayed, parallel_backend
 
-from singer_sdk.cli import common_options
 from singer_sdk.exceptions import RecordsWithoutSchemaException
 from singer_sdk.helpers._batch import BaseBatchFileEncoding
 from singer_sdk.helpers._classproperty import classproperty
@@ -28,7 +25,11 @@ from singer_sdk.helpers.capabilities import (
 from singer_sdk.io_base import SingerMessageType, SingerReader
 from singer_sdk.mapper import PluginMapper
 from singer_sdk.plugin_base import PluginBase
-from singer_sdk.sinks import Sink
+
+if t.TYPE_CHECKING:
+    from pathlib import PurePath
+
+    from singer_sdk.sinks import Sink
 
 _MAX_PARALLELISM = 8
 
@@ -51,6 +52,7 @@ class Target(PluginBase, SingerReader, metaclass=abc.ABCMeta):
 
     def __init__(
         self,
+        *,
         config: dict | PurePath | str | list[PurePath | str] | None = None,
         parse_env_config: bool = False,
         validate_config: bool = True,
@@ -169,8 +171,10 @@ class Target(PluginBase, SingerReader, metaclass=abc.ABCMeta):
             or existing_sink.key_properties != key_properties
         ):
             self.logger.info(
-                f"Schema or key properties for '{stream_name}' stream have changed. "
-                f"Initializing a new '{stream_name}' sink..."
+                "Schema or key properties for '%s' stream have changed. "
+                "Initializing a new '%s' sink...",
+                stream_name,
+                stream_name,
             )
             self._sinks_to_clear.append(self._sinks_active.pop(stream_name))
             return self.add_sink(stream_name, schema, key_properties)
@@ -195,10 +199,11 @@ class Target(PluginBase, SingerReader, metaclass=abc.ABCMeta):
         if self.default_sink_class:
             return self.default_sink_class
 
-        raise ValueError(
-            f"No sink class defined for '{stream_name}' "
-            "and no default sink class available."
+        msg = (
+            f"No sink class defined for '{stream_name}' and no default sink class "
+            "available."
         )
+        raise ValueError(msg)
 
     def sink_exists(self, stream_name: str) -> bool:
         """Check sink for a stream.
@@ -215,7 +220,10 @@ class Target(PluginBase, SingerReader, metaclass=abc.ABCMeta):
 
     @final
     def add_sink(
-        self, stream_name: str, schema: dict, key_properties: list[str] | None = None
+        self,
+        stream_name: str,
+        schema: dict,
+        key_properties: list[str] | None = None,
     ) -> Sink:
         """Create a sink and register it.
 
@@ -229,7 +237,7 @@ class Target(PluginBase, SingerReader, metaclass=abc.ABCMeta):
         Returns:
             A new sink for the stream.
         """
-        self.logger.info(f"Initializing '{self.name}' target sink...")
+        self.logger.info("Initializing '%s' target sink...", self.name)
         sink_class = self.get_sink_class(stream_name=stream_name)
         sink = sink_class(
             target=self,
@@ -252,14 +260,25 @@ class Target(PluginBase, SingerReader, metaclass=abc.ABCMeta):
                 is not sent.
         """
         if not self.sink_exists(stream_name):
-            raise RecordsWithoutSchemaException(
+            msg = (
                 f"A record for stream '{stream_name}' was encountered before a "
                 "corresponding schema."
             )
+            raise RecordsWithoutSchemaException(msg)
 
     # Message handling
 
-    def _process_lines(self, file_input: IO[str]) -> Counter[str]:
+    def _handle_max_record_age(self) -> None:
+        """Check if _MAX_RECORD_AGE_IN_MINUTES reached, and if so trigger drain."""
+        if self._max_record_age_in_minutes > self._MAX_RECORD_AGE_IN_MINUTES:
+            self.logger.info(
+                "One or more records have exceeded the max age of %d minutes. "
+                "Draining all sinks.",
+                self._MAX_RECORD_AGE_IN_MINUTES,
+            )
+            self.drain_all()
+
+    def _process_lines(self, file_input: t.IO[str]) -> t.Counter[str]:
         """Internal method to process jsonl lines from a Singer tap.
 
         Args:
@@ -268,16 +287,19 @@ class Target(PluginBase, SingerReader, metaclass=abc.ABCMeta):
         Returns:
             A counter object for the processed lines.
         """
-        self.logger.info(f"Target '{self.name}' is listening for input from tap.")
+        self.logger.info("Target '%s' is listening for input from tap.", self.name)
         counter = super()._process_lines(file_input)
 
         line_count = sum(counter.values())
 
         self.logger.info(
-            f"Target '{self.name}' completed reading {line_count} lines of input "
-            f"({counter[SingerMessageType.RECORD]} records, "
-            f"({counter[SingerMessageType.BATCH]} batch manifests, "
-            f"{counter[SingerMessageType.STATE]} state messages)."
+            "Target '%s' completed reading %d lines of input "
+            "(%d records, %d batch manifests, %d state messages).",
+            self.name,
+            line_count,
+            counter[SingerMessageType.RECORD],
+            counter[SingerMessageType.BATCH],
+            counter[SingerMessageType.STATE],
         )
 
         return counter
@@ -296,7 +318,6 @@ class Target(PluginBase, SingerReader, metaclass=abc.ABCMeta):
 
         stream_name = message_dict["stream"]
         for stream_map in self.mapper.stream_maps[stream_name]:
-            # new_schema = helpers._float_to_decimal(new_schema)
             raw_record = copy.copy(message_dict["record"])
             transformed_record = stream_map.transform(raw_record)
             if transformed_record is None:
@@ -307,7 +328,9 @@ class Target(PluginBase, SingerReader, metaclass=abc.ABCMeta):
             context = sink._get_context(transformed_record)
             if sink.include_sdc_metadata_properties:
                 sink._add_sdc_metadata_to_record(
-                    transformed_record, message_dict, context
+                    transformed_record,
+                    message_dict,
+                    context,
                 )
             else:
                 sink._remove_sdc_metadata_from_record(transformed_record)
@@ -321,9 +344,12 @@ class Target(PluginBase, SingerReader, metaclass=abc.ABCMeta):
 
             if sink.is_full:
                 self.logger.info(
-                    f"Target sink for '{sink.stream_name}' is full. Draining..."
+                    "Target sink for '%s' is full. Draining...",
+                    sink.stream_name,
                 )
                 self.drain_one(sink)
+
+        self._handle_max_record_age()
 
     def _process_schema_message(self, message_dict: dict) -> None:
         """Process a SCHEMA messages.
@@ -342,23 +368,25 @@ class Target(PluginBase, SingerReader, metaclass=abc.ABCMeta):
             do_registration = True
         elif self.mapper.stream_maps[stream_name][0].raw_schema != schema:
             self.logger.info(
-                f"Schema has changed for stream '{stream_name}'. "
-                "Mapping definitions will be reset."
+                "Schema has changed for stream '%s'. "
+                "Mapping definitions will be reset.",
+                stream_name,
             )
             do_registration = True
         elif (
             self.mapper.stream_maps[stream_name][0].raw_key_properties != key_properties
         ):
             self.logger.info(
-                f"Key properties have changed for stream '{stream_name}'. "
-                "Mapping definitions will be reset."
+                "Key properties have changed for stream '%s'. "
+                "Mapping definitions will be reset.",
+                stream_name,
             )
             do_registration = True
 
         if not do_registration:
             self.logger.debug(
-                f"No changes detected in SCHEMA message for stream '{stream_name}'. "
-                "Ignoring."
+                "No changes detected in SCHEMA message for stream '%s'. Ignoring.",
+                stream_name,
             )
             return
 
@@ -368,7 +396,6 @@ class Target(PluginBase, SingerReader, metaclass=abc.ABCMeta):
             key_properties,
         )
         for stream_map in self.mapper.stream_maps[stream_name]:
-            # new_schema = helpers._float_to_decimal(new_schema)
             _ = self.get_sink(
                 stream_map.stream_alias,
                 schema=stream_map.transformed_schema,
@@ -395,12 +422,6 @@ class Target(PluginBase, SingerReader, metaclass=abc.ABCMeta):
         if self._latest_state == state:
             return
         self._latest_state = state
-        if self._max_record_age_in_minutes > self._MAX_RECORD_AGE_IN_MINUTES:
-            self.logger.info(
-                "One or more records have exceeded the max age of "
-                f"{self._MAX_RECORD_AGE_IN_MINUTES} minutes. Draining all sinks."
-            )
-            self.drain_all()
 
     def _process_activate_version_message(self, message_dict: dict) -> None:
         """Handle the optional ACTIVATE_VERSION message extension.
@@ -425,11 +446,12 @@ class Target(PluginBase, SingerReader, metaclass=abc.ABCMeta):
             encoding,
             message_dict["manifest"],
         )
+        self._handle_max_record_age()
 
     # Sink drain methods
 
     @final
-    def drain_all(self, is_endofpipe: bool = False) -> None:
+    def drain_all(self, *, is_endofpipe: bool = False) -> None:
         """Drains all sinks, starting with those cleared due to changed schema.
 
         This method is internal to the SDK and should not need to be overridden.
@@ -488,90 +510,61 @@ class Target(PluginBase, SingerReader, metaclass=abc.ABCMeta):
             state: TODO
         """
         state_json = json.dumps(state)
-        self.logger.info(f"Emitting completed target state {state_json}")
+        self.logger.info("Emitting completed target state %s", state_json)
         sys.stdout.write(f"{state_json}\n")
         sys.stdout.flush()
 
     # CLI handler
 
-    @classproperty
-    def cli(cls) -> Callable:
+    @classmethod
+    def invoke(  # type: ignore[override]
+        cls: type[Target],
+        *,
+        about: bool = False,
+        about_format: str | None = None,
+        config: tuple[str, ...] = (),
+        file_input: t.IO[str] | None = None,
+    ) -> None:
+        """Invoke the target.
+
+        Args:
+            about: Display package metadata and settings.
+            about_format: Specify output style for `--about`.
+            config: Configuration file location or 'ENV' to use environment
+                variables. Accepts multiple inputs as a tuple.
+            file_input: Optional file to read input from.
+        """
+        super().invoke(about=about, about_format=about_format)
+        cls.print_version(print_fn=cls.logger.info)
+        config_files, parse_env_config = cls.config_from_cli_args(*config)
+
+        target = cls(
+            config=config_files,  # type: ignore[arg-type]
+            validate_config=True,
+            parse_env_config=parse_env_config,
+        )
+        target.listen(file_input)
+
+    @classmethod
+    def get_singer_command(cls: type[Target]) -> click.Command:
         """Execute standard CLI handler for taps.
 
         Returns:
-            A callable CLI object.
+            A click.Command object.
         """
-
-        @common_options.PLUGIN_VERSION
-        @common_options.PLUGIN_ABOUT
-        @common_options.PLUGIN_ABOUT_FORMAT
-        @common_options.PLUGIN_CONFIG
-        @common_options.PLUGIN_FILE_INPUT
-        @click.command(
-            help="Execute the Singer target.",
-            context_settings={"help_option_names": ["--help"]},
+        command = super().get_singer_command()
+        command.help = "Execute the Singer target."
+        command.params.extend(
+            [
+                click.Option(
+                    ["--input", "file_input"],
+                    help="A path to read messages from instead of from standard in.",
+                    type=click.File("r"),
+                ),
+            ],
         )
-        def cli(
-            version: bool = False,
-            about: bool = False,
-            config: tuple[str, ...] = (),
-            format: str | None = None,
-            file_input: FileIO | None = None,
-        ) -> None:
-            """Handle command line execution.
 
-            Args:
-                version: Display the package version.
-                about: Display package metadata and settings.
-                format: Specify output style for `--about`.
-                config: Configuration file location or 'ENV' to use environment
-                    variables. Accepts multiple inputs as a tuple.
-                file_input: Specify a path to an input file to read messages from.
-                    Defaults to standard in if unspecified.
-
-            Raises:
-                FileNotFoundError: If the config file does not exist.
-            """
-            if version:
-                cls.print_version()
-                return
-
-            if not about:
-                cls.print_version(print_fn=cls.logger.info)
-            else:
-                cls.print_about(format=format)
-                return
-
-            validate_config: bool = True
-
-            cls.print_version(print_fn=cls.logger.info)
-
-            parse_env_config = False
-            config_files: list[PurePath] = []
-            for config_path in config:
-                if config_path == "ENV":
-                    # Allow parse from env vars:
-                    parse_env_config = True
-                    continue
-
-                # Validate config file paths before adding to list
-                if not Path(config_path).is_file():
-                    raise FileNotFoundError(
-                        f"Could not locate config file at '{config_path}'."
-                        "Please check that the file exists."
-                    )
-
-                config_files.append(Path(config_path))
-
-            target = cls(  # type: ignore  # Ignore 'type not callable'
-                config=config_files or None,
-                parse_env_config=parse_env_config,
-                validate_config=validate_config,
-            )
-
-            target.listen(file_input)
-
-        return cli
+        return command
 
 
 class SQLTarget(Target):

@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import base64
-import logging
 import math
+import typing as t
 from datetime import datetime, timedelta
 from types import MappingProxyType
-from typing import Any, Mapping
 from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
 import jwt
@@ -16,7 +15,11 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 
 from singer_sdk.helpers._util import utc_now
-from singer_sdk.streams import Stream as RESTStreamBase
+
+if t.TYPE_CHECKING:
+    import logging
+
+    from singer_sdk.streams.rest import RESTStream
 
 
 def _add_parameters(initial_url: str, extra_parameters: dict) -> str:
@@ -35,7 +38,7 @@ def _add_parameters(initial_url: str, extra_parameters: dict) -> str:
         {
             parameter_name: [parameter_value]
             for parameter_name, parameter_value in extra_parameters.items()
-        }
+        },
     )
 
     new_query_string = urlencode(query_params, doseq=True)
@@ -59,7 +62,7 @@ class SingletonMeta(type):
         cls.__single_instance = None
         super().__init__(name, bases, dic)
 
-    def __call__(cls, *args: Any, **kwargs: Any) -> Any:  # noqa: ANN401
+    def __call__(cls, *args: t.Any, **kwargs: t.Any) -> t.Any:  # noqa: ANN401
         """Create or reuse the singleton.
 
         Args:
@@ -71,7 +74,7 @@ class SingletonMeta(type):
         """
         if cls.__single_instance:
             return cls.__single_instance
-        single_obj = cls.__new__(cls, None)  # type: ignore
+        single_obj = cls.__new__(cls, None)  # type: ignore[call-overload]
         single_obj.__init__(*args, **kwargs)
         cls.__single_instance = single_obj
         return single_obj
@@ -80,20 +83,20 @@ class SingletonMeta(type):
 class APIAuthenticatorBase:
     """Base class for offloading API auth."""
 
-    def __init__(self, stream: RESTStreamBase) -> None:
+    def __init__(self, stream: RESTStream) -> None:
         """Init authenticator.
 
         Args:
             stream: A stream for a RESTful endpoint.
         """
         self.tap_name: str = stream.tap_name
-        self._config: dict[str, Any] = dict(stream.config)
-        self._auth_headers: dict[str, Any] = {}
-        self._auth_params: dict[str, Any] = {}
+        self._config: dict[str, t.Any] = dict(stream.config)
+        self._auth_headers: dict[str, t.Any] = {}
+        self._auth_params: dict[str, t.Any] = {}
         self.logger: logging.Logger = stream.logger
 
     @property
-    def config(self) -> Mapping[str, Any]:
+    def config(self) -> t.Mapping[str, t.Any]:
         """Get stream or tap config.
 
         Returns:
@@ -169,7 +172,7 @@ class SimpleAuthenticator(APIAuthenticatorBase):
 
     def __init__(
         self,
-        stream: RESTStreamBase,
+        stream: RESTStream,
         auth_headers: dict | None = None,
     ) -> None:
         """Create a new authenticator.
@@ -199,7 +202,7 @@ class APIKeyAuthenticator(APIAuthenticatorBase):
 
     def __init__(
         self,
-        stream: RESTStreamBase,
+        stream: RESTStream,
         key: str,
         value: str,
         location: str = "header",
@@ -219,7 +222,8 @@ class APIKeyAuthenticator(APIAuthenticatorBase):
         auth_credentials = {key: value}
 
         if location not in ["header", "params"]:
-            raise ValueError("`type` must be one of 'header' or 'params'.")
+            msg = "`type` must be one of 'header' or 'params'."
+            raise ValueError(msg)
 
         if location == "header":
             if self._auth_headers is None:
@@ -233,7 +237,7 @@ class APIKeyAuthenticator(APIAuthenticatorBase):
     @classmethod
     def create_for_stream(
         cls: type[APIKeyAuthenticator],
-        stream: RESTStreamBase,
+        stream: RESTStream,
         key: str,
         value: str,
         location: str,
@@ -261,7 +265,7 @@ class BearerTokenAuthenticator(APIAuthenticatorBase):
     'Bearer '. The token will be merged with HTTP headers on the stream.
     """
 
-    def __init__(self, stream: RESTStreamBase, token: str) -> None:
+    def __init__(self, stream: RESTStream, token: str) -> None:
         """Create a new authenticator.
 
         Args:
@@ -277,7 +281,9 @@ class BearerTokenAuthenticator(APIAuthenticatorBase):
 
     @classmethod
     def create_for_stream(
-        cls: type[BearerTokenAuthenticator], stream: RESTStreamBase, token: str
+        cls: type[BearerTokenAuthenticator],
+        stream: RESTStream,
+        token: str,
     ) -> BearerTokenAuthenticator:
         """Create an Authenticator object specific to the Stream class.
 
@@ -302,7 +308,7 @@ class BasicAuthenticator(APIAuthenticatorBase):
 
     def __init__(
         self,
-        stream: RESTStreamBase,
+        stream: RESTStream,
         username: str,
         password: str,
     ) -> None:
@@ -325,7 +331,7 @@ class BasicAuthenticator(APIAuthenticatorBase):
     @classmethod
     def create_for_stream(
         cls: type[BasicAuthenticator],
-        stream: RESTStreamBase,
+        stream: RESTStream,
         username: str,
         password: str,
     ) -> BasicAuthenticator:
@@ -348,7 +354,7 @@ class OAuthAuthenticator(APIAuthenticatorBase):
 
     def __init__(
         self,
-        stream: RESTStreamBase,
+        stream: RESTStream,
         auth_endpoint: str | None = None,
         oauth_scopes: str | None = None,
         default_expiration: int | None = None,
@@ -398,7 +404,8 @@ class OAuthAuthenticator(APIAuthenticatorBase):
             ValueError: If the endpoint is not set.
         """
         if not self._auth_endpoint:
-            raise ValueError("Authorization endpoint not set.")
+            msg = "Authorization endpoint not set."
+            raise ValueError(msg)
         return self._auth_endpoint
 
     @property
@@ -442,9 +449,8 @@ class OAuthAuthenticator(APIAuthenticatorBase):
         Raises:
             NotImplementedError: If derived class does not override this method.
         """
-        raise NotImplementedError(
-            "The `oauth_request_body` property was not defined in the subclass."
-        )
+        msg = "The `oauth_request_body` property was not defined in the subclass."
+        raise NotImplementedError(msg)
 
     @property
     def client_id(self) -> str | None:
@@ -491,14 +497,19 @@ class OAuthAuthenticator(APIAuthenticatorBase):
         """
         request_time = utc_now()
         auth_request_payload = self.oauth_request_payload
-        token_response = requests.post(self.auth_endpoint, data=auth_request_payload)
+        token_response = requests.post(
+            self.auth_endpoint,
+            data=auth_request_payload,
+            timeout=60,
+        )
         try:
             token_response.raise_for_status()
-            self.logger.info("OAuth authorization attempt was successful.")
-        except Exception as ex:
-            raise RuntimeError(
-                f"Failed OAuth login, response was '{token_response.json()}'. {ex}"
-            )
+        except requests.HTTPError as ex:
+            msg = f"Failed OAuth login, response was '{token_response.json()}'. {ex}"
+            raise RuntimeError(msg) from ex
+
+        self.logger.info("OAuth authorization attempt was successful.")
+
         token_json = token_response.json()
         self.access_token = token_json["access_token"]
         self.expires_in = token_json.get("expires_in", self._default_expiration)
@@ -506,7 +517,7 @@ class OAuthAuthenticator(APIAuthenticatorBase):
             self.logger.debug(
                 "No expires_in receied in OAuth response and no "
                 "default_expiration set. Token will be treated as if it never "
-                "expires."
+                "expires.",
             )
         self.last_refreshed = request_time
 
@@ -559,9 +570,10 @@ class OAuthJWTAuthenticator(OAuthAuthenticator):
             ValueError: If the private key is not set.
         """
         if not self.private_key:
-            raise ValueError("Missing 'private_key' property for OAuth payload.")
+            msg = "Missing 'private_key' property for OAuth payload."
+            raise ValueError(msg)
 
-        private_key: bytes | Any = bytes(self.private_key, "UTF-8")
+        private_key: bytes | t.Any = bytes(self.private_key, "UTF-8")
         if self.private_key_passphrase:
             passphrase = bytes(self.private_key_passphrase, "UTF-8")
             private_key = serialization.load_pem_private_key(
@@ -569,10 +581,12 @@ class OAuthJWTAuthenticator(OAuthAuthenticator):
                 password=passphrase,
                 backend=default_backend(),
             )
-        private_key_string: str | Any = private_key.decode("UTF-8")
+        private_key_string: str | t.Any = private_key.decode("UTF-8")
         return {
             "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
             "assertion": jwt.encode(
-                self.oauth_request_body, private_key_string, "RS256"
+                self.oauth_request_body,
+                private_key_string,
+                "RS256",
             ),
         }

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import logging
+import typing as t
 from datetime import datetime
-from typing import Any
 
 import pendulum
 import pytest
@@ -56,7 +56,7 @@ from singer_sdk.helpers._typing import (
     ],
 )
 def test_conform_record_data_types(
-    record: dict[str, Any],
+    record: dict[str, t.Any],
     schema: dict,
     expected_row: dict,
     ignore_props_message: str,
@@ -67,7 +67,11 @@ def test_conform_record_data_types(
 
     with caplog.at_level(logging.INFO, logger=logger.name):
         actual = conform_record_data_types(
-            stream_name, record, schema, TypeConformanceLevel.RECURSIVE, logger
+            stream_name,
+            record,
+            schema,
+            TypeConformanceLevel.RECURSIVE,
+            logger,
         )
         if ignore_props_message:
             assert ignore_props_message in caplog.text
@@ -83,7 +87,10 @@ def test_conform_record_data_types(
         (pendulum.parse("2021-08-25T20:05:28+00:00"), "2021-08-25T20:05:28+00:00"),
         (pendulum.parse("2021-08-25T20:05:28+07:00"), "2021-08-25T20:05:28+07:00"),
         (
-            datetime.strptime("2021-08-25T20:05:28", "%Y-%m-%dT%H:%M:%S"),
+            datetime.strptime(  # noqa: DTZ007
+                "2021-08-25T20:05:28",
+                "%Y-%m-%dT%H:%M:%S",
+            ),
             "2021-08-25T20:05:28+00:00",
         ),
         (
@@ -120,7 +127,7 @@ def test_to_json_compatible(datetime_val, expected):
                         "items": {"type": "string", "format": "date-time"},
                     },
                     {"type": "null"},
-                ]
+                ],
             },
             None,
         ),

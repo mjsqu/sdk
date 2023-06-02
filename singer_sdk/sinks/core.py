@@ -6,11 +6,10 @@ import abc
 import datetime
 import json
 import time
+import typing as t
 from gzip import GzipFile
 from gzip import open as gzip_open
-from logging import Logger
 from types import MappingProxyType
-from typing import IO, Any, Mapping, Sequence
 
 from dateutil import parser
 from jsonschema import Draft7Validator, FormatChecker
@@ -27,7 +26,11 @@ from singer_sdk.helpers._typing import (
     get_datelike_property_type,
     handle_invalid_timestamp_in_record,
 )
-from singer_sdk.plugin_base import PluginBase
+
+if t.TYPE_CHECKING:
+    from logging import Logger
+
+    from singer_sdk.plugin_base import PluginBase
 
 JSONSchemaValidator = Draft7Validator
 
@@ -60,13 +63,16 @@ class Sink(metaclass=abc.ABCMeta):
         self._config = dict(target.config)
         self._pending_batch: dict | None = None
         self.stream_name = stream_name
-        self.logger.info(f"Initializing target sink for stream '{stream_name}'...")
+        self.logger.info(
+            "Initializing target sink for stream '%s'...",
+            stream_name,
+        )
         self.schema = schema
         if self.include_sdc_metadata_properties:
             self._add_sdc_metadata_to_schema()
         else:
             self._remove_sdc_metadata_from_schema()
-        self.records_to_drain: list[dict] | Any = []
+        self.records_to_drain: list[dict] | t.Any = []
         self._context_draining: dict | None = None
         self.latest_state: dict | None = None
         self._draining_state: dict | None = None
@@ -82,7 +88,7 @@ class Sink(metaclass=abc.ABCMeta):
 
         self._validator = Draft7Validator(schema, format_checker=FormatChecker())
 
-    def _get_context(self, record: dict) -> dict:
+    def _get_context(self, record: dict) -> dict:  # noqa: ARG002
         """Return an empty dictionary by default.
 
         NOTE: Future versions of the SDK may expand the available context attributes.
@@ -166,7 +172,7 @@ class Sink(metaclass=abc.ABCMeta):
     # Properties
 
     @property
-    def config(self) -> Mapping[str, Any]:
+    def config(self) -> t.Mapping[str, t.Any]:
         """Get plugin configuration.
 
         Returns:
@@ -214,12 +220,15 @@ class Sink(metaclass=abc.ABCMeta):
     # Record processing
 
     def _add_sdc_metadata_to_record(
-        self, record: dict, message: dict, context: dict
+        self,
+        record: dict,
+        message: dict,
+        context: dict,
     ) -> None:
         """Populate metadata _sdc columns from incoming record message.
 
         Record metadata specs documented at:
-        https://sdk.meltano.com/en/latest/implementation/record_metadata.md
+        https://sdk.meltano.com/en/latest/implementation/record_metadata.html
 
         Args:
             record: Individual record in the stream.
@@ -227,9 +236,12 @@ class Sink(metaclass=abc.ABCMeta):
             context: Stream partition or context dictionary.
         """
         record["_sdc_extracted_at"] = message.get("time_extracted")
-        record["_sdc_received_at"] = datetime.datetime.now().isoformat()
+        record["_sdc_received_at"] = datetime.datetime.now(
+            tz=datetime.timezone.utc,
+        ).isoformat()
         record["_sdc_batched_at"] = (
-            context.get("batch_start_time", None) or datetime.datetime.now()
+            context.get("batch_start_time", None)
+            or datetime.datetime.now(tz=datetime.timezone.utc)
         ).isoformat()
         record["_sdc_deleted_at"] = record.get("_sdc_deleted_at")
         record["_sdc_sequence"] = int(round(time.time() * 1000))
@@ -239,7 +251,7 @@ class Sink(metaclass=abc.ABCMeta):
         """Add _sdc metadata columns.
 
         Record metadata specs documented at:
-        https://sdk.meltano.com/en/latest/implementation/record_metadata.md
+        https://sdk.meltano.com/en/latest/implementation/record_metadata.html
         """
         properties_dict = self.schema["properties"]
         for col in {
@@ -259,7 +271,7 @@ class Sink(metaclass=abc.ABCMeta):
         """Remove _sdc metadata columns.
 
         Record metadata specs documented at:
-        https://sdk.meltano.com/en/latest/implementation/record_metadata.md
+        https://sdk.meltano.com/en/latest/implementation/record_metadata.html
         """
         properties_dict = self.schema["properties"]
         for col in {
@@ -276,7 +288,7 @@ class Sink(metaclass=abc.ABCMeta):
         """Remove metadata _sdc columns from incoming record message.
 
         Record metadata specs documented at:
-        https://sdk.meltano.com/en/latest/implementation/record_metadata.md
+        https://sdk.meltano.com/en/latest/implementation/record_metadata.html
 
         Args:
             record: Individual record in the stream.
@@ -301,12 +313,17 @@ class Sink(metaclass=abc.ABCMeta):
         """
         self._validator.validate(record)
         self._parse_timestamps_in_record(
-            record=record, schema=self.schema, treatment=self.datetime_error_treatment
+            record=record,
+            schema=self.schema,
+            treatment=self.datetime_error_treatment,
         )
         return record
 
     def _parse_timestamps_in_record(
-        self, record: dict, schema: dict, treatment: DatetimeErrorTreatmentEnum
+        self,
+        record: dict,
+        schema: dict,
+        treatment: DatetimeErrorTreatmentEnum,
     ) -> None:
         """Parse strings to datetime.datetime values, repairing or erroring on failure.
 
@@ -319,14 +336,14 @@ class Sink(metaclass=abc.ABCMeta):
             schema: TODO
             treatment: TODO
         """
-        for key in record.keys():
+        for key in record:
             datelike_type = get_datelike_property_type(schema["properties"][key])
             if datelike_type:
+                date_val = record[key]
                 try:
-                    date_val = record[key]
                     if record[key] is not None:
                         date_val = parser.parse(date_val)
-                except Exception as ex:
+                except parser.ParserError as ex:
                     date_val = handle_invalid_timestamp_in_record(
                         record,
                         [key],
@@ -344,10 +361,11 @@ class Sink(metaclass=abc.ABCMeta):
         Args:
             context: Stream partition or context dictionary.
         """
+        self.logger.debug("Processed record: %s", context)
 
     # SDK developer overrides:
 
-    def preprocess_record(self, record: dict, context: dict) -> dict:
+    def preprocess_record(self, record: dict, context: dict) -> dict:  # noqa: ARG002
         """Process incoming record and return a modified result.
 
         Args:
@@ -402,7 +420,8 @@ class Sink(metaclass=abc.ABCMeta):
         Raises:
             NotImplementedError: If derived class does not override this method.
         """
-        raise NotImplementedError("No handling exists for process_batch().")
+        msg = "No handling exists for process_batch()."
+        raise NotImplementedError(msg)
 
     def mark_drained(self) -> None:
         """Reset `records_to_drain` and any other tracking."""
@@ -411,7 +430,7 @@ class Sink(metaclass=abc.ABCMeta):
         self._context_draining = None
         if self._batch_records_read:
             self.tally_record_written(
-                self._batch_records_read - self._batch_dupe_records_merged
+                self._batch_records_read - self._batch_dupe_records_merged,
             )
         self._batch_records_read = 0
 
@@ -427,7 +446,7 @@ class Sink(metaclass=abc.ABCMeta):
         _ = new_version
         self.logger.warning(
             "ACTIVATE_VERSION message received but not implemented by this target. "
-            "Ignoring."
+            "Ignoring.",
         )
 
     def setup(self) -> None:
@@ -436,6 +455,7 @@ class Sink(metaclass=abc.ABCMeta):
         Setup is executed once per Sink instance, after instantiation. If a Schema
         change is detected, a new Sink is instantiated and this method is called again.
         """
+        self.logger.info("Setting up %s", self.stream_name)
 
     def clean_up(self) -> None:
         """Perform any clean up actions required at end of a stream.
@@ -444,11 +464,12 @@ class Sink(metaclass=abc.ABCMeta):
         that may be in use from other instances of the same sink. Stream name alone
         should not be relied on, it's recommended to use a uuid as well.
         """
+        self.logger.info("Cleaning up %s", self.stream_name)
 
     def process_batch_files(
         self,
         encoding: BaseBatchFileEncoding,
-        files: Sequence[str],
+        files: t.Sequence[str],
     ) -> None:
         """Process a batch file with the given batch context.
 
@@ -459,7 +480,7 @@ class Sink(metaclass=abc.ABCMeta):
         Raises:
             NotImplementedError: If the batch file encoding is not supported.
         """
-        file: GzipFile | IO
+        file: GzipFile | t.IO
         storage: StorageTarget | None = None
 
         for path in files:
@@ -471,13 +492,20 @@ class Sink(metaclass=abc.ABCMeta):
                 storage = StorageTarget.from_url(head)
 
             if encoding.format == BatchFileFormat.JSONL:
-                with storage.fs(create=False) as batch_fs:
-                    with batch_fs.open(tail, mode="rb") as file:
-                        if encoding.compression == "gzip":
-                            file = gzip_open(file)
-                        context = {"records": [json.loads(line) for line in file]}
-                        self.process_batch(context)
+                with storage.fs(create=False) as batch_fs, batch_fs.open(
+                    tail,
+                    mode="rb",
+                ) as file:
+                    open_file = (
+                        gzip_open(file) if encoding.compression == "gzip" else file
+                    )
+                    context = {
+                        "records": [
+                            json.loads(line)
+                            for line in open_file  # type: ignore[attr-defined]
+                        ],
+                    }
+                    self.process_batch(context)
             else:
-                raise NotImplementedError(
-                    f"Unsupported batch encoding format: {encoding.format}"
-                )
+                msg = f"Unsupported batch encoding format: {encoding.format}"
+                raise NotImplementedError(msg)

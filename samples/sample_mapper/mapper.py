@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-from pathlib import PurePath
-from typing import Generator
+import typing as t
 
 import singer_sdk._singerlib as singer
 import singer_sdk.typing as th
 from singer_sdk.helpers._util import utc_now
 from singer_sdk.mapper import PluginMapper
 from singer_sdk.mapper_base import InlineMapper
+
+if t.TYPE_CHECKING:
+    from pathlib import PurePath
 
 
 class StreamTransform(InlineMapper):
@@ -34,16 +36,17 @@ class StreamTransform(InlineMapper):
                             },
                         },
                         "additionalProperties": {"type": ["string", "null"]},
-                    }
-                )
+                    },
+                ),
             ),
             required=True,
             description="Stream maps",
-        )
+        ),
     ).to_dict()
 
     def __init__(
         self,
+        *,
         config: dict | PurePath | str | list[PurePath | str] | None = None,
         parse_env_config: bool = False,
         validate_config: bool = True,
@@ -69,7 +72,7 @@ class StreamTransform(InlineMapper):
     def map_schema_message(
         self,
         message_dict: dict,
-    ) -> Generator[singer.Message, None, None]:
+    ) -> t.Generator[singer.Message, None, None]:
         """Map a schema message according to config.
 
         Args:
@@ -98,7 +101,7 @@ class StreamTransform(InlineMapper):
     def map_record_message(
         self,
         message_dict: dict,
-    ) -> Generator[singer.Message, None, None]:
+    ) -> t.Generator[singer.Message, None, None]:
         """Map a record message according to config.
 
         Args:
@@ -136,7 +139,7 @@ class StreamTransform(InlineMapper):
     def map_activate_version_message(
         self,
         message_dict: dict,
-    ) -> Generator[singer.Message, None, None]:
+    ) -> t.Generator[singer.Message, None, None]:
         """Duplicate the message or alias the stream name as defined in configuration.
 
         Args:
