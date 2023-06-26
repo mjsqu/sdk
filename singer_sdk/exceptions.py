@@ -115,3 +115,6 @@ class ConformedNameClashException(Exception):
 
     e.g. two columns conformed to the same name
     """
+
+class ReplicationKeyException(Exception):
+    """Raised when there are issues with the provided replication key."""
